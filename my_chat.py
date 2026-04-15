@@ -25,7 +25,7 @@ while True:
     else:
         messages.append({"role": "user" , "content": user_input})
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model = "gpt-3.5-turbo",
             messages = messages
         )
         messages.append({"role": "assistant" , "content": response.choices[0].message.content})
