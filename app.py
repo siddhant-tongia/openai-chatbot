@@ -1,7 +1,10 @@
 from dotenv import load_dotenv
 from openai import OpenAI
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from twilio.twiml.messaging_response import MessagingResponse
+from twilio.rest import Client
+from io import BytesIO
+import json
 import os
 
 load_dotenv()
@@ -166,6 +169,72 @@ def clear_history(user_id):
         conversations[user_id]["messages"] = []
         return jsonify({"status": "CLEARED"})
     return jsonify({"error": "User not Found"}),404
-    
+
+# /analytics route that accepts GET(stat of one specific user)
+@app.route("/analytics/<user_id>",methods=['GET'])
+def get_user_analytics(user_id):
+    if user_id not in conversations:
+        return jsonify({"Error": "User not found"}),404
+    messages = conversations[user_id]["messages"]
+    user_messages = [m for m in messages if m["role"] == "user"]
+    return jsonify({
+        "user_id": user_id,
+        "total_conversation": len(user_messages),
+        "total_message": len(messages),
+        "business_type": conversations[user_id]["business_type"]
+    })
+# /analytics route that accepts GET(overall stat of all user)
+@app.route("/analytics", methods=['GET'])
+def get_analytics():
+    total_messages = 0
+    total_user_messages = 0
+    for user_id in conversations:
+        all_messages = conversations[user_id]["messages"]
+        total_messages += len(all_messages)
+        for m in all_messages:
+            if m["role"] == "user":
+                total_user_messages += 1
+    return jsonify({
+        "total_users": len(conversations),
+        "total_user_messages": total_user_messages,
+        "total_messages": total_messages,
+    })
+# /export route that accept GET
+@app.route("/expost/<user_id>",methods=['GET'])
+def export(user_id):
+    if user_id not in conversations:
+        return jsonify({"Error": "User not found"}),404
+    data = {"user_id": user_id, "message": conversations[user_id]["messages"]}
+    json_data = json.dumps(data , indent=2)
+    byte_file = BytesIO(json_data.encode())
+    return send_file(
+        byte_file,
+        mimetype="application/json",
+        as_attachment=True,
+        download_name=f"conversation_{user_id}.json"
+    )
+# Initialize the Twilio REST client using secure credentials stored in environment variables
+twilio_client = Client(os.getenv("TWILIO_ACCOUNT_SID"), os.getenv("TWILIO_AUTH_TOKEN"))
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
+
+# /send_whatsapp route that accepts POST
+@app.route("/send_whatsapp",methods=['POST'])
+def send_whatsapp():
+    data = request.json
+    to_number = data.get('to_number')
+    message = data.get('message')
+    try:
+        response = twilio_client.messages.create(
+            from_=TWILIO_WHATSAPP_NUMBER,
+            body=message,
+            to=f"whatsapp:{to_number}"
+        )
+        return jsonify({
+            "status": "SENT",
+            "message_id": response.sid
+        })
+    except Exception as e:
+    	return jsonify({"status": "error","error": str(e)}), 400
+
 if __name__ == "__main__":
     app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
